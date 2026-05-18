@@ -1,0 +1,14 @@
+pandas
+numpy
+yfinance
+matplotlib
+plotly
+streamlit
+requests
+lxml
+html5lib
+beautifulsoup4
+scikit-learn
+xgboost
+sqlalchemy
+python-dotenv

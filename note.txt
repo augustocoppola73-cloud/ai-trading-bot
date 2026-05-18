@@ -1,0 +1,7 @@
+
+
+Per riattivare il venv digitare
+
+.\.venv\Scripts\Activate.ps1
+
+da questo punto vediamo attivo l'ambiente virtuale e possiamo lanciare il data_loader e vedere i risultati
