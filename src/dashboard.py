@@ -1708,6 +1708,36 @@ def build_klinechart_html(
       padding: 24px;
       color: #ffb4b4;
     }}
+    #indicator-list {{
+      display: flex;
+      flex-direction: row;
+      flex-wrap: wrap;
+      gap: 4px;
+    }}
+    .ind-tag {{
+      background: #19232d;
+      border: 1px solid #344554;
+      color: #d7dee8;
+      font-size: 12px;
+      border-radius: 5px;
+      padding: 3px 6px;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }}
+    .ind-tag button {{
+      border: none;
+      background: none;
+      color: #ff6b6b;
+      cursor: pointer;
+      font-size: 13px;
+      line-height: 1;
+      padding: 0 2px;
+      font-weight: bold;
+    }}
+    .ind-tag button:hover {{
+      color: #ff3b3b;
+    }}
   </style>
 </head>
 <body>
@@ -1762,6 +1792,7 @@ def build_klinechart_html(
         </select>
         <button id="add-indicator" title="Aggiungi l'indicatore selezionato">Aggiungi</button>
         <button id="reset-indicators" class="subtle" title="Ripristina indicatori base">Reset</button>
+        <div id="indicator-list"></div>
       </div>
     </div>
     <div id="chart"></div>
@@ -1774,6 +1805,7 @@ def build_klinechart_html(
     const data = {payload};
     const overlayGroupId = 'manual';
     const overlayIds = new Set();
+    const indicatorPanes = new Map(); // name -> paneId
     let selectedOverlayId = null;
 
     function fail(message) {{
@@ -1960,8 +1992,37 @@ def build_klinechart_html(
       }});
 
       chart.applyNewData(data);
-      chart.createIndicator('VOL');
-      chart.createIndicator('MA', true, {{ id: 'candle_pane' }});
+      indicatorPanes.set('VOL', chart.createIndicator('VOL'));
+      indicatorPanes.set('MA', chart.createIndicator('MA', true, {{ id: 'candle_pane' }}));
+      renderIndicatorList();
+
+      function renderIndicatorList() {{
+        const OVERLAY_INDICATORS = new Set(['MA', 'EMA', 'BOLL', 'SAR']);
+        const container = document.getElementById('indicator-list');
+        if (!container) return;
+        container.innerHTML = '';
+        indicatorPanes.forEach((paneId, name) => {{
+          const tag = document.createElement('span');
+          tag.className = 'ind-tag';
+          const label = document.createTextNode(name + ' ');
+          const btn = document.createElement('button');
+          btn.textContent = '\u00d7';
+          btn.title = 'Rimuovi ' + name;
+          btn.addEventListener('click', () => {{
+            if (OVERLAY_INDICATORS.has(name)) {{
+              chart.removeIndicator('candle_pane', name);
+            }} else {{
+              chart.removeIndicator(paneId);
+            }}
+            indicatorPanes.delete(name);
+            renderIndicatorList();
+            setStatus('Indicatore rimosso: ' + name + '.');
+          }});
+          tag.appendChild(label);
+          tag.appendChild(btn);
+          container.appendChild(tag);
+        }});
+      }}
 
       function clearActiveButtons() {{
         document.querySelectorAll('button').forEach(item => item.classList.remove('active'));
@@ -2081,12 +2142,19 @@ def build_klinechart_html(
           setStatus('Scegli prima un indicatore.');
           return;
         }}
-        const option = select.options[select.selectedIndex];
-        if (option.dataset.overlay === '1') {{
-          chart.createIndicator(name, true, {{ id: 'candle_pane' }});
-        }} else {{
-          chart.createIndicator(name);
+        if (indicatorPanes.has(name)) {{
+          setStatus(name + ' \u00e8 gi\u00e0 attivo.');
+          return;
         }}
+        const OVERLAY_INDICATORS = new Set(['MA', 'EMA', 'BOLL', 'SAR']);
+        let paneId;
+        if (OVERLAY_INDICATORS.has(name)) {{
+          paneId = chart.createIndicator(name, true, {{ id: 'candle_pane' }});
+        }} else {{
+          paneId = chart.createIndicator(name);
+        }}
+        indicatorPanes.set(name, paneId);
+        renderIndicatorList();
         clearActiveButtons();
         document.getElementById('add-indicator').classList.add('active');
         setStatus('Indicatore aggiunto: ' + name + '.');
@@ -2096,8 +2164,10 @@ def build_klinechart_html(
         ['MA', 'EMA', 'BOLL', 'SAR', 'VOL', 'MACD', 'RSI', 'KDJ'].forEach(name => {{
           chart.removeIndicator({{ name }});
         }});
-        chart.createIndicator('VOL');
-        chart.createIndicator('MA', true, {{ id: 'candle_pane' }});
+        indicatorPanes.clear();
+        indicatorPanes.set('VOL', chart.createIndicator('VOL'));
+        indicatorPanes.set('MA', chart.createIndicator('MA', true, {{ id: 'candle_pane' }}));
+        renderIndicatorList();
         clearActiveButtons();
         document.getElementById('reset-indicators').classList.add('active');
         setStatus('Indicatori ripristinati: VOL e MA.');
