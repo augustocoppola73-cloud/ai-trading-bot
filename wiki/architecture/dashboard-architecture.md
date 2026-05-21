@@ -111,3 +111,31 @@ drawing interactions are handled by the pro chart component rather than Plotly.
 Persistent drawings are still a future integration point because Streamlit's
 static HTML component does not automatically round-trip chart overlay state
 back to Python.
+
+## Trading Board Roadmap
+
+The KLineCharts board should evolve incrementally toward a professional manual
+analysis component without changing trading signals, scanner scoring, backtest
+logic, or portfolio sizing.
+
+Current near-term direction:
+
+- Keep drawing and indicator controls inside the HTML component so tool changes
+  do not trigger Streamlit reruns.
+- Prefer grouped, compact controls with clear active state over many flat
+  buttons.
+- Support reliable manual deletion through selected-overlay and group-overlay
+  removal.
+- Keep ruler and Fibonacci behavior local to the chart component.
+
+Future work before calling the board production-grade:
+
+- Extract the HTML, CSS, and JavaScript from `dashboard.py` into a dedicated
+  component boundary.
+- Persist drawings per ticker, visible range, and candle interval.
+- Add a property panel for drawing color, thickness, lock state, visibility,
+  and Fibonacci levels.
+- Add keyboard shortcuts and a richer context menu after manual interaction
+  behavior is stable.
+- Consider vendoring KLineCharts or building a proper Streamlit custom
+  component if offline support or two-way drawing state becomes required.

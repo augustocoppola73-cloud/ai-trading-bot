@@ -109,3 +109,29 @@ Paper trading reports currently include:
 Paper portfolio plan rows include audit columns such as `position_status`,
 `decision_reason`, `risk_$`, and `risk_%`. Summary rows include `run_id`,
 `market`, `cash_%`, `exposure_%`, key parameters, and generated file paths.
+
+## Scanner Contract Direction
+
+The market scanner should separate three concepts:
+
+- `signal`: the technical BUY/HOLD/SELL state derived from strategy rules.
+- `scanner_score`: the numeric ranking score used to order opportunities.
+- `opportunity_label`: the user-facing interpretation such as Strong BUY, BUY,
+  Watchlist, SELL / Exit Watch, or Weak / Avoid.
+
+These fields should remain deterministic for the same price data and strategy
+preset. Future scanner changes should be additive and preserve existing report
+columns unless a coordinated migration is explicitly approved.
+
+Future scanner hardening should add data quality fields such as latest price
+date, minimum history status, stale data status, invalid-data reason, and row
+count. Invalid assets should be visible in audit/report output instead of
+silently disappearing from the scanner.
+
+Implemented scanner hardening currently adds audit fields including
+`data_status`, `data_quality_reason`, `price_rows`, `latest_price_date`,
+`min_history_ok`, `selection_score`, `label_score`, `score_schema_version`,
+`buy_gate_passed`, `buy_gate_fail_reasons`, and
+`score_consistency_status`. These are additive fields; existing scanner report
+columns remain the compatibility contract for dashboard, paper trading, and
+backtesting.

@@ -46,10 +46,19 @@ def run_daily_paper_trading(
     risk_per_trade: float = 0.01,
     atr_multiplier: float = 2.0,
     market: str = "Custom",
-    strategy_config: dict | None = None
+    strategy_config: dict | None = None,
+    download_missing: bool = True,
+    progress_callback=None,
+    progress_context: dict | None = None
 ):
 
-    scanner_results = scan_market(tickers, strategy_config=strategy_config)
+    scanner_results = scan_market(
+        tickers,
+        strategy_config=strategy_config,
+        download_missing=download_missing,
+        progress_callback=progress_callback,
+        progress_context=progress_context
+    )
 
     portfolio_plan, remaining_cash, decision_log = build_portfolio_plan(
         scanner_results=scanner_results,
@@ -148,7 +157,10 @@ def run_paper_trading_for_market(
     min_score: float = 120,
     risk_per_trade: float = 0.01,
     atr_multiplier: float = 2.0,
-    strategy_config: dict | None = None
+    strategy_config: dict | None = None,
+    download_missing: bool = True,
+    progress_callback=None,
+    progress_context: dict | None = None
 ):
 
     tickers = get_assets_for_market(market_name)
@@ -161,7 +173,10 @@ def run_paper_trading_for_market(
         risk_per_trade=risk_per_trade,
         atr_multiplier=atr_multiplier,
         market=market_name,
-        strategy_config=strategy_config
+        strategy_config=strategy_config,
+        download_missing=download_missing,
+        progress_callback=progress_callback,
+        progress_context=progress_context
     )
 
 
@@ -173,7 +188,10 @@ def run_paper_trading_for_tickers(
     min_score: float = 120,
     risk_per_trade: float = 0.01,
     atr_multiplier: float = 2.0,
-    strategy_config: dict | None = None
+    strategy_config: dict | None = None,
+    download_missing: bool = True,
+    progress_callback=None,
+    progress_context: dict | None = None
 ):
 
     return run_daily_paper_trading(
@@ -184,5 +202,8 @@ def run_paper_trading_for_tickers(
         risk_per_trade=risk_per_trade,
         atr_multiplier=atr_multiplier,
         market=market_label,
-        strategy_config=strategy_config
+        strategy_config=strategy_config,
+        download_missing=download_missing,
+        progress_callback=progress_callback,
+        progress_context=progress_context
     )

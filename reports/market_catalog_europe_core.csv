@@ -1,0 +1,21 @@
+ticker,name,exchange,currency
+AIR.PA,Airbus SE,France - Euronext Paris,EUR
+OR.PA,L'Oreal S.A.,France - Euronext Paris,EUR
+MC.PA,LVMH Moet Hennessy Louis Vuitton,France - Euronext Paris,EUR
+SAN.PA,Sanofi S.A.,France - Euronext Paris,EUR
+TTE.PA,TotalEnergies SE,France - Euronext Paris,EUR
+SAP.DE,SAP SE,Germany - Xetra,EUR
+SIE.DE,Siemens AG,Germany - Xetra,EUR
+ALV.DE,Allianz SE,Germany - Xetra,EUR
+DTE.DE,Deutsche Telekom AG,Germany - Xetra,EUR
+BAS.DE,BASF SE,Germany - Xetra,EUR
+ASML.AS,ASML Holding N.V.,Netherlands - Euronext Amsterdam,EUR
+INGA.AS,ING Groep N.V.,Netherlands - Euronext Amsterdam,EUR
+SAN.MC,Banco Santander S.A.,Spain - Bolsa de Madrid,EUR
+ITX.MC,Industria de Diseno Textil S.A.,Spain - Bolsa de Madrid,EUR
+NESN.SW,Nestle S.A.,Switzerland - SIX,CHF
+NOVN.SW,Novartis AG,Switzerland - SIX,CHF
+ROG.SW,Roche Holding AG,Switzerland - SIX,CHF
+AZN.L,AstraZeneca PLC,UK - London Stock Exchange,GBp
+SHEL.L,Shell PLC,UK - London Stock Exchange,GBp
+HSBA.L,HSBC Holdings PLC,UK - London Stock Exchange,GBp

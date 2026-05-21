@@ -8,6 +8,16 @@ def get_paper_trading_decision_reason(
     min_score: float
 ) -> str:
 
+    data_status = row.get("data_status")
+    if pd.notna(data_status) and data_status != "OK":
+        return f"EXCLUDED_DATA_{data_status}"
+
+    if pd.isna(row["close"]) or row["close"] <= 0:
+        return "EXCLUDED_INVALID_CLOSE_PRICE"
+
+    if pd.isna(row["atr"]) or row["atr"] <= 0:
+        return "EXCLUDED_INVALID_ATR"
+
     if row["scanner_score"] < min_score:
         return "EXCLUDED_SCORE_BELOW_MINIMUM"
 
@@ -16,12 +26,6 @@ def get_paper_trading_decision_reason(
 
     if row["signal"] != "BUY":
         return "EXCLUDED_SIGNAL_NOT_BUY"
-
-    if pd.isna(row["close"]) or row["close"] <= 0:
-        return "EXCLUDED_INVALID_CLOSE_PRICE"
-
-    if pd.isna(row["atr"]) or row["atr"] <= 0:
-        return "EXCLUDED_INVALID_ATR"
 
     return "INCLUDED_VALID_BUY_SETUP"
 

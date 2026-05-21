@@ -144,7 +144,7 @@ def load_price_data(ticker: str, interval: str) -> pd.DataFrame:
     return data
 
 
-def price_cache_is_fresh(data: pd.DataFrame, fresh_days: int = 1) -> bool:
+def price_cache_is_fresh(data: pd.DataFrame, fresh_days: int = 3) -> bool:
     if data.empty or "date" not in data.columns:
         return False
 
@@ -157,7 +157,7 @@ def price_cache_is_fresh(data: pd.DataFrame, fresh_days: int = 1) -> bool:
 def load_price_data_bulk(
     tickers: list,
     interval: str = "1d",
-    fresh_days: int = 1,
+    fresh_days: int = 3,
     chunk_size: int = PRICE_CACHE_CHUNK_SIZE
 ) -> tuple[dict, dict]:
     unique_tickers = list(dict.fromkeys(tickers))
@@ -267,7 +267,11 @@ def save_price_data(ticker: str, interval: str, data: pd.DataFrame):
         connection.commit()
 
 
-def save_price_data_bulk(data_by_ticker: dict, interval: str):
+def save_price_data_bulk(
+    data_by_ticker: dict,
+    interval: str,
+    replace: bool = False
+):
     if not data_by_ticker:
         return
 
@@ -302,24 +306,48 @@ def save_price_data_bulk(data_by_ticker: dict, interval: str):
     if not frames:
         return
 
-    all_price_data = pd.concat(frames, ignore_index=True)
+    all_price_data = (
+        pd.concat(frames, ignore_index=True)
+        .drop_duplicates(
+            subset=["ticker", "interval", "date"],
+            keep="last"
+        )
+    )
     tickers = list(data_by_ticker.keys())
+    rows = list(all_price_data.itertuples(index=False, name=None))
 
     with get_connection() as connection:
+        if replace:
+            connection.executemany(
+                "DELETE FROM price_cache WHERE ticker = ? AND interval = ?",
+                [(ticker, interval) for ticker in tickers]
+            )
+
         connection.executemany(
-            "DELETE FROM price_cache WHERE ticker = ? AND interval = ?",
-            [(ticker, interval) for ticker in tickers]
-        )
-        all_price_data.to_sql(
-            "price_cache",
-            connection,
-            if_exists="append",
-            index=False
+            """
+            INSERT OR REPLACE INTO price_cache (
+                ticker,
+                interval,
+                date,
+                open,
+                high,
+                low,
+                close,
+                volume,
+                cached_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            rows
         )
         connection.commit()
 
 
-def get_price_cache_status(tickers: list, interval: str = "1d") -> dict:
+def get_price_cache_status(
+    tickers: list,
+    interval: str = "1d",
+    fresh_days: int = 3
+) -> dict:
     if not tickers:
         return {}
 
@@ -340,9 +368,21 @@ def get_price_cache_status(tickers: list, interval: str = "1d") -> dict:
             ).fetchall()
 
             for row in rows:
+                latest_date = pd.to_datetime(row[1]) if row[1] else pd.NaT
+                has_rows = row[2] and row[2] > 0
+                cache_status = "missing"
+
+                if has_rows and pd.notna(latest_date):
+                    cache_status = (
+                        "loaded"
+                        if (pd.Timestamp.today().date() - latest_date.date()).days <= fresh_days
+                        else "stale"
+                    )
+
                 status[row[0]] = {
                     "last_date": row[1],
-                    "rows": row[2]
+                    "rows": row[2],
+                    "status": cache_status
                 }
 
     return status

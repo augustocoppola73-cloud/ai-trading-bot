@@ -1,0 +1,4 @@
+ticker,scanner_score,market_regime,signal,position_status,decision_reason,entry_price,atr,stop_loss_price,initial_trailing_stop,risk_per_trade_%,risk_$,risk_%,capital_allocation_%,capital_allocation_$,estimated_quantity,estimated_max_loss_$
+TIT.MI,201.43,BULL,BUY,SELECTED,SELECTED_VALID_BUY_SETUP,0.7,0.0144,0.67,0.66,1.0,10.0,1.0,24.31,243.06,347.2222,10.0
+BMED.MI,190.85,BULL,BUY,SELECTED,SELECTED_VALID_BUY_SETUP,19.22,0.4288,18.36,18.15,1.0,7.57,0.76,16.96,169.64,8.8263,7.57
+TEN.MI,185.72,BULL,BUY,SELECTED,SELECTED_VALID_BUY_SETUP,27.16,0.7632,25.63,25.25,1.0,5.87,0.59,10.45,104.5,3.8476,5.87

@@ -9,7 +9,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from date_ranges import get_start_date_for_range
 from indicators import add_indicators
-from portfolio_scanner import build_scanner_row
+from portfolio_scanner import (
+    build_buy_gate_context,
+    build_scanner_row,
+    scan_market_from_price_data,
+)
 
 
 def scanner_latest(**overrides):
@@ -78,6 +82,10 @@ class OperationalScannerTests(unittest.TestCase):
         self.assertIn(row["opportunity_label"], ["Strong BUY", "BUY"])
         self.assertGreater(row["setup_score"], row["scanner_score"])
         self.assertIn("Bollinger", row["reason"])
+        self.assertTrue(row["buy_gate_passed"])
+        self.assertEqual(row["selection_score"], row["scanner_score"])
+        self.assertEqual(row["label_score"], row["setup_score"])
+        self.assertEqual(row["score_schema_version"], "v1_legacy_additive")
 
     def test_sell_is_classified_as_exit_watch(self):
         row = build_scanner_row(
@@ -87,6 +95,8 @@ class OperationalScannerTests(unittest.TestCase):
 
         self.assertEqual(row["opportunity_label"], "SELL / Exit Watch")
         self.assertIn("SELL/uscita", row["reason"])
+        self.assertFalse(row["buy_gate_passed"])
+        self.assertIn("SIGNAL_NOT_BUY", row["buy_gate_fail_reasons"])
 
     def test_upper_bollinger_extension_penalizes_setup(self):
         balanced = build_scanner_row("AAA", scanner_latest())
@@ -97,6 +107,39 @@ class OperationalScannerTests(unittest.TestCase):
 
         self.assertLess(extended["setup_score"], balanced["setup_score"])
         self.assertIn("Bollinger alta", extended["reason"])
+
+    def test_buy_gate_context_explains_exclusions(self):
+        row = build_scanner_row(
+            "AAA",
+            scanner_latest(signal="HOLD", market_regime="SIDEWAYS")
+        )
+        context = build_buy_gate_context(
+            row,
+            min_score=120,
+            max_volatility_pct=6
+        )
+
+        self.assertFalse(context["buy_gate_passed"])
+        self.assertIn("SIGNAL_NOT_BUY", context["buy_gate_fail_reasons"])
+        self.assertIn("REGIME_NOT_BULL", context["buy_gate_fail_reasons"])
+
+    def test_scan_market_from_price_data_reports_insufficient_history(self):
+        short_data = pd.DataFrame({
+            "date": pd.date_range("2026-01-01", periods=20, freq="B"),
+            "open": range(20),
+            "high": range(1, 21),
+            "low": range(20),
+            "close": range(1, 21),
+            "volume": [1000] * 20,
+        })
+
+        scanner = scan_market_from_price_data(
+            {"AAA": short_data},
+            tickers=["AAA"]
+        )
+
+        self.assertEqual(scanner.iloc[0]["data_status"], "INSUFFICIENT_HISTORY")
+        self.assertEqual(scanner.iloc[0]["opportunity_label"], "No Data")
 
     def test_date_range_presets(self):
         end_date = date(2026, 5, 16)
@@ -129,6 +172,7 @@ class OperationalScannerTests(unittest.TestCase):
             get_start_date_for_range(end_date, "1Y"),
             date(2025, 5, 16)
         )
+
 
 
 if __name__ == "__main__":

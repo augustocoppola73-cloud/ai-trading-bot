@@ -3,7 +3,11 @@ import hashlib
 import pandas as pd
 
 from market_cache import load_price_data_bulk
-from market_data import download_data_bulk
+from market_data import (
+    build_incremental_start_date,
+    download_data_bulk,
+    merge_price_data
+)
 from indicators import add_indicators
 from ai_filter import calculate_ai_score
 from strategy import generate_signals
@@ -27,7 +31,8 @@ def load_market_price_data(
     progress_callback=None,
     progress_context: dict | None = None,
     interval: str = "1d",
-    return_metadata: bool = False
+    return_metadata: bool = False,
+    download_missing: bool = True
 ) -> dict | tuple[dict, dict]:
     unique_tickers = list(dict.fromkeys(tickers))
     price_data_by_ticker, cache_status = load_price_data_bulk(
@@ -68,19 +73,45 @@ def load_market_price_data(
     downloaded_by_ticker = {}
     failed_downloads = []
 
-    if tickers_to_download:
-        downloaded_by_ticker, failed_downloads = download_data_bulk(
-            tickers=tickers_to_download,
-            interval=interval,
-            progress_callback=progress_callback,
-            progress_context=progress_context
-        )
+    if tickers_to_download and download_missing:
+        full_download_tickers = missing_tickers + invalid_tickers
+
+        if full_download_tickers:
+            full_downloads, full_failures = download_data_bulk(
+                tickers=full_download_tickers,
+                interval=interval,
+                progress_callback=progress_callback,
+                progress_context=progress_context
+            )
+            downloaded_by_ticker.update(full_downloads)
+            failed_downloads.extend(full_failures)
+
+        stale_groups = {}
+        for ticker in stale_tickers:
+            incremental_start = build_incremental_start_date(
+                cache_status.get(ticker, {}).get("last_date")
+            )
+            stale_groups.setdefault(incremental_start, []).append(ticker)
+
+        for incremental_start, grouped_tickers in stale_groups.items():
+            incremental_downloads, incremental_failures = download_data_bulk(
+                tickers=grouped_tickers,
+                interval=interval,
+                start=incremental_start,
+                progress_callback=progress_callback,
+                progress_context=progress_context
+            )
+            downloaded_by_ticker.update(incremental_downloads)
+            failed_downloads.extend(incremental_failures)
 
         for ticker, data in downloaded_by_ticker.items():
             data = data.copy()
             data["date"] = pd.to_datetime(data["date"])
             data = data.sort_values("date").reset_index(drop=True)
-            price_data_by_ticker[ticker] = data
+            price_data_by_ticker[ticker] = merge_price_data(
+                price_data_by_ticker.get(ticker),
+                data
+            )
 
     for ticker in invalid_tickers:
         if ticker not in downloaded_by_ticker:
@@ -103,6 +134,7 @@ def load_market_price_data(
         "stale_from_cache": len(stale_tickers),
         "missing_from_cache": len(missing_tickers),
         "invalid_from_cache": len(invalid_tickers),
+        "download_missing": download_missing,
         "downloaded": len(downloaded_by_ticker),
         "failed_downloads": len(set(failed_downloads)),
         "loaded": len(price_data_by_ticker),

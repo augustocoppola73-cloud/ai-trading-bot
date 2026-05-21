@@ -5,11 +5,52 @@ from market_cache import load_price_data, save_price_data, save_price_data_bulk
 
 
 BULK_DOWNLOAD_BATCH_SIZE = 100
+INCREMENTAL_DOWNLOAD_OVERLAP_DAYS = 7
+
+
+def build_incremental_start_date(
+    last_date,
+    overlap_days: int = INCREMENTAL_DOWNLOAD_OVERLAP_DAYS
+) -> str | None:
+    if last_date is None:
+        return None
+
+    parsed_date = pd.to_datetime(last_date, errors="coerce")
+    if pd.isna(parsed_date):
+        return None
+
+    start_date = parsed_date.normalize() - pd.Timedelta(days=overlap_days)
+
+    return start_date.date().isoformat()
+
+
+def flatten_downloaded_columns(columns) -> list:
+    if not isinstance(columns, pd.MultiIndex):
+        return list(columns)
+
+    price_fields = {
+        "open",
+        "high",
+        "low",
+        "close",
+        "adj close",
+        "volume"
+    }
+
+    for level_index in range(columns.nlevels):
+        level_values = [
+            str(value).strip().lower()
+            for value in columns.get_level_values(level_index)
+        ]
+        if any(value in price_fields for value in level_values):
+            return list(columns.get_level_values(level_index))
+
+    return list(columns.get_level_values(0))
 
 
 def normalize_downloaded_data(df: pd.DataFrame) -> pd.DataFrame:
     if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.get_level_values(0)
+        df.columns = flatten_downloaded_columns(df.columns)
 
     df = df.reset_index()
 
@@ -17,6 +58,34 @@ def normalize_downloaded_data(df: pd.DataFrame) -> pd.DataFrame:
         str(col).lower().replace(" ", "_")
         for col in df.columns
     ]
+
+    date_aliases = ["date", "datetime", "index"]
+    date_column = next(
+        (column for column in date_aliases if column in df.columns),
+        None
+    )
+
+    if date_column and date_column != "date":
+        df = df.rename(columns={date_column: "date"})
+
+    if "adj_close" in df.columns and "close" not in df.columns:
+        df = df.rename(columns={"adj_close": "close"})
+
+    required_columns = ["date", "open", "high", "low", "close", "volume"]
+    for column in required_columns:
+        if column not in df.columns:
+            df[column] = pd.NA
+
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    for column in ["open", "high", "low", "close", "volume"]:
+        df[column] = pd.to_numeric(df[column], errors="coerce")
+
+    df = (
+        df
+        .dropna(subset=["date", "open", "high", "low", "close"])
+        .sort_values("date")
+        .reset_index(drop=True)
+    )
 
     return df
 
@@ -34,22 +103,31 @@ def cache_is_fresh(data: pd.DataFrame) -> bool:
 def download_data(
     ticker: str,
     period: str = "5y",
-    interval: str = "1d"
+    interval: str = "1d",
+    start: str | None = None,
+    end: str | None = None
 ) -> pd.DataFrame:
     use_cache = interval == "1d"
 
-    if use_cache:
+    if use_cache and start is None and end is None:
         cached_data = load_price_data(ticker=ticker, interval=interval)
 
         if cache_is_fresh(cached_data):
             return cached_data
 
-    df = yf.download(
-        ticker,
-        period=period,
-        interval=interval,
-        auto_adjust=True
-    )
+    download_kwargs = {
+        "tickers": ticker,
+        "interval": interval,
+        "auto_adjust": True
+    }
+    if start is not None:
+        download_kwargs["start"] = start
+    if end is not None:
+        download_kwargs["end"] = end
+    if start is None and end is None:
+        download_kwargs["period"] = period
+
+    df = yf.download(**download_kwargs)
 
     if df.empty:
         raise ValueError(f"Nessun dato trovato per {ticker}")
@@ -57,13 +135,42 @@ def download_data(
     df = normalize_downloaded_data(df)
 
     if use_cache:
-        save_price_data(
-            ticker=ticker,
-            interval=interval,
-            data=df
-        )
+        if start is None and end is None:
+            save_price_data(
+                ticker=ticker,
+                interval=interval,
+                data=df
+            )
+        else:
+            save_price_data_bulk({ticker: df}, interval=interval)
 
     return df
+
+
+def merge_price_data(
+    existing_data: pd.DataFrame | None,
+    new_data: pd.DataFrame | None
+) -> pd.DataFrame:
+    if existing_data is None or existing_data.empty:
+        if new_data is None:
+            return pd.DataFrame()
+        return new_data.copy()
+
+    if new_data is None or new_data.empty:
+        return existing_data.copy()
+
+    merged_data = pd.concat(
+        [existing_data.copy(), new_data.copy()],
+        ignore_index=True
+    )
+    merged_data["date"] = pd.to_datetime(merged_data["date"])
+
+    return (
+        merged_data
+        .drop_duplicates(subset=["date"], keep="last")
+        .sort_values("date")
+        .reset_index(drop=True)
+    )
 
 
 def extract_downloaded_ticker_data(
@@ -103,6 +210,8 @@ def download_data_bulk(
     period: str = "5y",
     interval: str = "1d",
     batch_size: int = BULK_DOWNLOAD_BATCH_SIZE,
+    start: str | None = None,
+    end: str | None = None,
     progress_callback=None,
     progress_context: dict | None = None
 ) -> tuple[dict, list]:
@@ -110,21 +219,28 @@ def download_data_bulk(
     failed_tickers = []
     unique_tickers = list(dict.fromkeys(tickers))
 
-    for start in range(0, len(unique_tickers), batch_size):
-        ticker_batch = unique_tickers[start:start + batch_size]
-        batch_index = (start // batch_size) + 1
+    for batch_start in range(0, len(unique_tickers), batch_size):
+        ticker_batch = unique_tickers[batch_start:batch_start + batch_size]
+        batch_index = (batch_start // batch_size) + 1
         batch_total = (len(unique_tickers) + batch_size - 1) // batch_size
 
         try:
-            downloaded_data = yf.download(
-                tickers=ticker_batch,
-                period=period,
-                interval=interval,
-                auto_adjust=True,
-                group_by="ticker",
-                threads=True,
-                progress=False
-            )
+            download_kwargs = {
+                "tickers": ticker_batch,
+                "interval": interval,
+                "auto_adjust": True,
+                "group_by": "ticker",
+                "threads": True,
+                "progress": False
+            }
+            if start is not None:
+                download_kwargs["start"] = start
+            if end is not None:
+                download_kwargs["end"] = end
+            if start is None and end is None:
+                download_kwargs["period"] = period
+
+            downloaded_data = yf.download(**download_kwargs)
 
             batch_results = {}
             single_ticker = len(ticker_batch) == 1
@@ -156,7 +272,9 @@ def download_data_bulk(
                     ticker_data = download_data(
                         ticker=ticker,
                         period=period,
-                        interval=interval
+                        interval=interval,
+                        start=start,
+                        end=end
                     )
                     downloaded_by_ticker[ticker] = ticker_data
                 except Exception:

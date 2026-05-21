@@ -38,6 +38,15 @@ from portfolio_backtest import (
 )
 from portfolio_performance import calculate_portfolio_performance
 from prompt_generator import generate_prompt
+from screener_filters import (
+    SCREENER_COLUMN_VIEWS,
+    SCREENER_PRESETS,
+    SCREENER_SORT_OPTIONS,
+    filter_screener_dataframe,
+    get_screener_columns,
+    get_screener_preset_defaults,
+    sort_screener_dataframe
+)
 
 
 st.set_page_config(
@@ -590,7 +599,7 @@ def render_global_asset_search(
         if st.button(
             "Valida con yfinance",
             key=f"{key_prefix}_validate_global",
-            use_container_width=True
+            width="stretch"
         ):
             try:
                 verified_record = validate_custom_ticker(search_text)
@@ -642,7 +651,7 @@ def render_global_asset_search(
         if st.button(
             "Aggiungi a watchlist",
             key=f"{key_prefix}_add_watchlist",
-            use_container_width=True
+            width="stretch"
         ):
             add_ticker_to_watchlist(selected_asset["ticker"])
             st.success(f"{selected_asset['ticker']} aggiunto alla watchlist.")
@@ -651,7 +660,7 @@ def render_global_asset_search(
         if allow_basket and st.button(
             "Aggiungi al paniere",
             key=f"{key_prefix}_add_basket",
-            use_container_width=True
+            width="stretch"
         ):
             add_ticker_to_manual_basket(selected_asset["ticker"])
             st.success(f"{selected_asset['ticker']} aggiunto al paniere.")
@@ -660,7 +669,7 @@ def render_global_asset_search(
         if st.button(
             "Imposta focus",
             key=f"{key_prefix}_set_focus",
-            use_container_width=True
+            width="stretch"
         ):
             set_asset_focus(selected_asset["ticker"])
             st.rerun()
@@ -675,7 +684,7 @@ def render_global_asset_search(
         if action_columns[0].button(
             "Aggiungi a watchlist",
             key=f"{key_prefix}_add_watchlist",
-            use_container_width=True
+            width="stretch"
         ):
             add_ticker_to_watchlist(selected_asset["ticker"])
             st.success(f"{selected_asset['ticker']} aggiunto alla watchlist.")
@@ -684,7 +693,7 @@ def render_global_asset_search(
         if action_columns[1].button(
             "Imposta focus",
             key=f"{key_prefix}_set_focus",
-            use_container_width=True
+            width="stretch"
         ):
             set_asset_focus(selected_asset["ticker"])
             st.rerun()
@@ -692,7 +701,7 @@ def render_global_asset_search(
         if allow_basket and action_columns[2].button(
             "Aggiungi al paniere",
             key=f"{key_prefix}_add_basket",
-            use_container_width=True
+            width="stretch"
         ):
             add_ticker_to_manual_basket(selected_asset["ticker"])
             st.success(f"{selected_asset['ticker']} aggiunto al paniere.")
@@ -755,7 +764,7 @@ def render_watchlist_button(ticker: str, key: str):
     is_favorite = ticker in watchlist
     label = "★" if is_favorite else "☆"
 
-    if st.button(label, key=key, use_container_width=True):
+    if st.button(label, key=key, width="stretch"):
         if is_favorite:
             watchlist = [item for item in watchlist if item != ticker]
         else:
@@ -854,7 +863,18 @@ def build_screener_dataframe(
         "bb_middle",
         "bb_upper",
         "bb_bandwidth",
-        "bb_percent_b"
+        "bb_percent_b",
+        "data_status",
+        "data_quality_reason",
+        "price_rows",
+        "latest_price_date",
+        "min_history_ok",
+        "selection_score",
+        "label_score",
+        "score_schema_version",
+        "buy_gate_passed",
+        "buy_gate_fail_reasons",
+        "score_consistency_status"
     ]
     available_columns = [
         column for column in scanner_columns
@@ -896,7 +916,18 @@ def build_screener_dataframe(
         "bb_middle",
         "bb_upper",
         "bb_bandwidth",
-        "bb_percent_b"
+        "bb_percent_b",
+        "data_status",
+        "data_quality_reason",
+        "price_rows",
+        "latest_price_date",
+        "min_history_ok",
+        "selection_score",
+        "label_score",
+        "score_schema_version",
+        "buy_gate_passed",
+        "buy_gate_fail_reasons",
+        "score_consistency_status"
     ]
 
     for column in display_columns:
@@ -910,74 +941,22 @@ def build_screener_dataframe(
     ).reset_index(drop=True)
 
 
-def filter_screener_dataframe(
-    screener: pd.DataFrame,
-    market_filter: list,
-    search_text: str,
-    only_watchlist: bool,
-    signal_filter: str,
-    regime_filter: str,
-    opportunity_filter: str,
-    min_score: float,
-    max_atr_pct: float | None
-) -> pd.DataFrame:
-    filtered = screener.copy()
-
-    if market_filter:
-        filtered = filtered[filtered["market"].isin(market_filter)]
-
-    if search_text:
-        search_text = search_text.strip().lower()
-        filtered = filtered[
-            filtered["ticker"].str.lower().str.contains(
-                search_text,
-                na=False
-            ) |
-            filtered["name"].astype(str).str.lower().str.contains(
-                search_text,
-                na=False
-            )
-        ]
-
-    if only_watchlist:
-        filtered = filtered[filtered["watchlist"]]
-
-    if signal_filter != "ALL":
-        filtered = filtered[filtered["signal"] == signal_filter]
-
-    if regime_filter != "ALL":
-        filtered = filtered[filtered["market_regime"] == regime_filter]
-
-    if opportunity_filter == "Solo candidati long":
-        filtered = filtered[
-            filtered["opportunity_label"].isin(["Strong BUY", "BUY"])
-        ]
-    elif opportunity_filter == "Solo sell/uscita":
-        filtered = filtered[filtered["signal"] == "SELL"]
-
-    filtered = filtered[
-        filtered["scanner_score"].fillna(float("-inf")) >= min_score
-    ]
-
-    if max_atr_pct is not None:
-        filtered = filtered[
-            filtered["volatility_%"].fillna(float("inf")) <= max_atr_pct
-        ]
-
-    return filtered.reset_index(drop=True)
-
-
 def render_screener_editor(
     screener: pd.DataFrame,
-    key: str
+    key: str,
+    column_view: str = "Completa"
 ) -> pd.DataFrame:
+    visible_columns = get_screener_columns(screener, column_view)
+    visible_screener = screener[visible_columns].copy()
+
     return st.data_editor(
-        screener,
+        visible_screener,
         key=key,
-        use_container_width=True,
+        width="stretch",
+        height=520,
         hide_index=True,
         disabled=[
-            column for column in screener.columns
+            column for column in visible_screener.columns
             if column != "watchlist"
         ],
         column_config={
@@ -990,23 +969,34 @@ def render_screener_editor(
             "exchange": "Exchange",
             "currency": "Valuta",
             "data_ultima_chiusura": "Ultima chiusura",
-            "close": st.column_config.NumberColumn("Close", format="%.2f"),
+            "close": st.column_config.NumberColumn(
+                "Prezzo",
+                format="%.2f",
+                width="small"
+            ),
             "scanner_score": st.column_config.NumberColumn(
-                "Score",
-                format="%.2f"
+                "Scanner",
+                format="%.2f",
+                width="small"
             ),
             "setup_score": st.column_config.NumberColumn(
                 "Setup",
-                format="%.2f"
+                format="%.2f",
+                width="small"
             ),
             "opportunity_label": "Opportunita",
-            "signal": "Signal",
+            "signal": "Segnale",
             "market_regime": "Regime",
-            "reason": "Reason",
-            "rsi": st.column_config.NumberColumn("RSI", format="%.2f"),
+            "reason": "Motivo",
+            "rsi": st.column_config.NumberColumn(
+                "RSI",
+                format="%.2f",
+                width="small"
+            ),
             "volatility_%": st.column_config.NumberColumn(
                 "ATR %",
-                format="%.2f"
+                format="%.2f",
+                width="small"
             ),
             "adx": st.column_config.NumberColumn("ADX", format="%.2f"),
             "macd": st.column_config.NumberColumn("MACD", format="%.4f"),
@@ -1015,8 +1005,9 @@ def render_screener_editor(
                 format="%.4f"
             ),
             "volume_ratio": st.column_config.NumberColumn(
-                "Vol Ratio",
-                format="%.2f"
+                "Vol x",
+                format="%.2f",
+                width="small"
             ),
             "bb_lower": st.column_config.NumberColumn(
                 "BB Low",
@@ -1301,11 +1292,16 @@ def get_chart_candle_options(range_label: str) -> list:
 
 
 def filter_chart_data_to_range(data: pd.DataFrame, range_label: str) -> pd.DataFrame:
-    if data.empty:
+    if data.empty or "date" not in data.columns:
         return data
 
     data = data.copy()
     data["date"] = pd.to_datetime(data["date"])
+    data = data.dropna(subset=["date"]).sort_values("date")
+
+    if data.empty:
+        return data
+
     latest_date = data["date"].max()
 
     if range_label == "1D":
@@ -1328,8 +1324,45 @@ def filter_chart_data_to_range(data: pd.DataFrame, range_label: str) -> pd.DataF
     return data[data["date"] >= start_date]
 
 
-def resample_ohlcv(data: pd.DataFrame, rule: str) -> pd.DataFrame:
+def normalize_asset_price_data(data: pd.DataFrame) -> pd.DataFrame:
     if data.empty:
+        return data
+
+    normalized = data.copy()
+
+    if "date" not in normalized.columns:
+        date_alias = next(
+            (
+                column for column in ["datetime", "index"]
+                if column in normalized.columns
+            ),
+            None
+        )
+        if date_alias:
+            normalized = normalized.rename(columns={date_alias: "date"})
+
+    required_columns = ["date", "open", "high", "low", "close", "volume"]
+    if not all(column in normalized.columns for column in required_columns):
+        return pd.DataFrame(columns=required_columns)
+
+    normalized = normalized[required_columns].copy()
+    normalized["date"] = pd.to_datetime(normalized["date"], errors="coerce")
+
+    for column in ["open", "high", "low", "close", "volume"]:
+        normalized[column] = pd.to_numeric(normalized[column], errors="coerce")
+
+    normalized = (
+        normalized
+        .dropna(subset=["date", "open", "high", "low", "close"])
+        .sort_values("date")
+        .reset_index(drop=True)
+    )
+
+    return normalized
+
+
+def resample_ohlcv(data: pd.DataFrame, rule: str) -> pd.DataFrame:
+    if data.empty or "date" not in data.columns:
         return data
 
     required_columns = ["open", "high", "low", "close", "volume"]
@@ -1356,11 +1389,7 @@ def resample_ohlcv(data: pd.DataFrame, rule: str) -> pd.DataFrame:
     return resampled
 
 
-def load_asset_price_data_with_fallback(
-    ticker: str,
-    range_label: str,
-    candle_label: str
-):
+def build_chart_price_attempts(range_label: str, candle_label: str) -> list:
     range_config = ASSET_RANGE_OPTIONS[range_label]
     candle_config = CHART_CANDLE_OPTIONS[candle_label]
     attempts = [
@@ -1369,7 +1398,8 @@ def load_asset_price_data_with_fallback(
             {
                 "period": range_config["period"],
                 "interval": candle_config["interval"],
-                "resample": candle_config["resample"]
+                "resample": candle_config["resample"],
+                "filter_range": range_label,
             }
         )
     ]
@@ -1377,13 +1407,57 @@ def load_asset_price_data_with_fallback(
     if candle_label in ["5m", "15m"]:
         attempts.append((
             "30m fallback",
-            {"period": range_config["period"], "interval": "30m", "resample": None}
+            {
+                "period": range_config["period"],
+                "interval": "30m",
+                "resample": None,
+                "filter_range": range_label,
+            }
         ))
+
     if candle_label in ["5m", "15m", "30m"]:
         attempts.append((
             "1h fallback",
-            {"period": range_config["period"], "interval": "60m", "resample": None}
+            {
+                "period": range_config["period"],
+                "interval": "60m",
+                "resample": None,
+                "filter_range": range_label,
+            }
         ))
+
+    if range_label == "1D":
+        attempts.append((
+            "daily fallback",
+            {
+                "period": "1mo",
+                "interval": "1d",
+                "resample": None,
+                "filter_range": "1M",
+            }
+        ))
+
+    if candle_label != "1d":
+        attempts.append((
+            "1D fallback",
+            {
+                "period": range_config["period"] if range_label != "1D" else "1mo",
+                "interval": "1d",
+                "resample": None,
+                "filter_range": range_label if range_label != "1D" else "1M",
+            }
+        ))
+
+    return attempts
+
+
+def load_asset_price_data_with_fallback(
+    ticker: str,
+    range_label: str,
+    candle_label: str
+):
+    range_config = ASSET_RANGE_OPTIONS[range_label]
+    attempts = build_chart_price_attempts(range_label, candle_label)
 
     last_error = None
 
@@ -1394,14 +1468,15 @@ def load_asset_price_data_with_fallback(
                 period=attempt_config["period"],
                 interval=attempt_config["interval"]
             )
+            data = normalize_asset_price_data(data)
+
             if data.empty:
-                last_error = ValueError("dataset vuoto")
+                last_error = ValueError("dataset vuoto o formato prezzi non valido")
                 continue
 
-            data["date"] = pd.to_datetime(data["date"])
             data = filter_chart_data_to_range(
                 data=data,
-                range_label=range_label
+                range_label=attempt_config["filter_range"]
             )
 
             if attempt_config.get("resample"):
@@ -1541,7 +1616,7 @@ def build_klinechart_html(
     }}
     .topbar {{
       display: flex;
-      gap: 6px;
+      gap: 8px;
       align-items: center;
       padding: 8px 10px;
       border-bottom: 1px solid #25313b;
@@ -1550,19 +1625,33 @@ def build_klinechart_html(
     }}
     .title {{
       font-weight: 700;
-      margin-right: 12px;
+      margin-right: 8px;
       color: #f4f7fb;
+      white-space: nowrap;
     }}
-    button {{
+    .tool-group {{
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 4px;
+      border: 1px solid #25313b;
+      border-radius: 7px;
+      background: #151d26;
+    }}
+    button, select {{
       border: 1px solid #344554;
       background: #19232d;
       color: #d7dee8;
-      border-radius: 5px;
-      padding: 5px 8px;
+      border-radius: 6px;
+      min-height: 30px;
+      padding: 5px 9px;
       font-weight: 600;
+      outline: none;
+    }}
+    button {{
       cursor: pointer;
     }}
-    button:hover, button.active {{
+    button:hover, button.active, select:focus, button:focus {{
       border-color: #4aa3ff;
       background: #20364b;
       color: #ffffff;
@@ -1571,11 +1660,31 @@ def build_klinechart_html(
       border-color: #ff5a5f;
       background: #4b2028;
     }}
+    button.subtle {{
+      color: #aeb9c5;
+    }}
     .section {{
       color: #8b9aaa;
       font-size: 12px;
       font-weight: 700;
-      margin-left: 10px;
+      padding: 0 3px;
+      white-space: nowrap;
+    }}
+    .fib-panel {{
+      display: none;
+      align-items: center;
+      gap: 5px;
+      color: #aeb9c5;
+      font-size: 12px;
+    }}
+    .fib-panel.visible {{
+      display: inline-flex;
+    }}
+    .fib-panel label {{
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      white-space: nowrap;
     }}
     #chart {{
       flex: 1;
@@ -1587,6 +1696,13 @@ def build_klinechart_html(
       color: #9aa8b5;
       font-size: 12px;
       background: #111820;
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+    }}
+    .status {{
+      color: #d7dee8;
     }}
     .error {{
       padding: 24px;
@@ -1598,39 +1714,88 @@ def build_klinechart_html(
   <div class="board">
     <div class="topbar">
       <div class="title">{title}</div>
-      <span class="section">Disegno</span>
-      <button data-tool="segment">Segmento</button>
-      <button data-tool="rayLine">Raggio</button>
-      <button data-tool="straightLine">Retta</button>
-      <button data-tool="horizontalStraightLine">Orizz.</button>
-      <button data-tool="priceLine">Prezzo</button>
-      <button data-tool="priceChannelLine">Canale</button>
-      <button data-tool="parallelStraightLine">Parallele</button>
-      <button data-tool="fibonacciLine">Fibonacci</button>
-      <button data-tool="measureLine">Righello</button>
-      <button class="danger" id="clear-overlays">Cancella disegni</button>
-      <span class="section">Indicatori</span>
-      <button data-indicator="MA" data-overlay="1">MA</button>
-      <button data-indicator="EMA" data-overlay="1">EMA</button>
-      <button data-indicator="BOLL" data-overlay="1">BOLL</button>
-      <button data-indicator="SAR" data-overlay="1">SAR</button>
-      <button data-indicator="VOL">VOL</button>
-      <button data-indicator="MACD">MACD</button>
-      <button data-indicator="RSI">RSI</button>
-      <button data-indicator="KDJ">KDJ</button>
+      <div class="tool-group">
+        <span class="section">Disegno</span>
+        <select id="drawing-tool" title="Seleziona strumento di disegno">
+          <option value="">Scegli strumento</option>
+          <option value="segment">Segmento</option>
+          <option value="rayLine">Raggio</option>
+          <option value="straightLine">Retta</option>
+          <option value="horizontalStraightLine">Orizzontale</option>
+          <option value="priceLine">Linea prezzo</option>
+          <option value="priceChannelLine">Canale</option>
+          <option value="parallelStraightLine">Parallele</option>
+          <option value="proFibonacci">Fibonacci</option>
+          <option value="measureLine">Righello</option>
+        </select>
+        <button id="arm-tool" title="Attiva lo strumento selezionato">Attiva</button>
+        <button id="idle-tool" class="subtle" title="Torna a navigazione">Naviga</button>
+      </div>
+      <div class="tool-group fib-panel" id="fib-panel">
+        <span class="section">Fib</span>
+        <label><input type="checkbox" data-fib="0" checked>0</label>
+        <label><input type="checkbox" data-fib="0.236" checked>23.6</label>
+        <label><input type="checkbox" data-fib="0.382" checked>38.2</label>
+        <label><input type="checkbox" data-fib="0.5" checked>50</label>
+        <label><input type="checkbox" data-fib="0.618" checked>61.8</label>
+        <label><input type="checkbox" data-fib="0.786">78.6</label>
+        <label><input type="checkbox" data-fib="1" checked>100</label>
+        <label><input type="checkbox" data-fib="1.618">161.8</label>
+      </div>
+      <div class="tool-group">
+        <span class="section">Azioni</span>
+        <button id="delete-selected" title="Cancella il disegno selezionato">Elimina selezionato</button>
+        <button class="danger" id="clear-overlays" title="Cancella tutti i disegni manuali">Cancella disegni</button>
+      </div>
+      <div class="tool-group">
+        <span class="section">Indicatori</span>
+        <select id="indicator-tool" title="Seleziona indicatore">
+          <option value="">Aggiungi indicatore</option>
+          <option value="MA" data-overlay="1">MA</option>
+          <option value="EMA" data-overlay="1">EMA</option>
+          <option value="BOLL" data-overlay="1">BOLL</option>
+          <option value="SAR" data-overlay="1">SAR</option>
+          <option value="VOL">VOL</option>
+          <option value="MACD">MACD</option>
+          <option value="RSI">RSI</option>
+          <option value="KDJ">KDJ</option>
+        </select>
+        <button id="add-indicator" title="Aggiungi l'indicatore selezionato">Aggiungi</button>
+        <button id="reset-indicators" class="subtle" title="Ripristina indicatori base">Reset</button>
+      </div>
     </div>
     <div id="chart"></div>
     <div class="hint">
-      Click sullo strumento, poi disegna sul grafico. Fibonacci e righello sono manuali.
-      Tasto destro su un disegno per rimuoverlo; "Cancella disegni" svuota tutti gli overlay.
+      <span>Disegna nel grafico senza ricaricare Streamlit. Tasto destro o Canc/Backspace eliminano il disegno selezionato.</span>
+      <span class="status" id="tool-status">Navigazione pronta.</span>
     </div>
   </div>
   <script>
     const data = {payload};
+    const overlayGroupId = 'manual';
+    const overlayIds = new Set();
+    let selectedOverlayId = null;
 
     function fail(message) {{
       document.getElementById('chart').innerHTML =
         '<div class="error">' + message + '</div>';
+    }}
+
+    function setStatus(message) {{
+      const status = document.getElementById('tool-status');
+      if (status) {{
+        status.textContent = message;
+      }}
+    }}
+
+    function getFibLevels() {{
+      const levels = [];
+      document.querySelectorAll('input[data-fib]').forEach(input => {{
+        if (input.checked) {{
+          levels.push(Number(input.dataset.fib));
+        }}
+      }});
+      return levels.length ? levels : [0, 0.382, 0.5, 0.618, 1];
     }}
 
     if (!window.klinecharts) {{
@@ -1650,24 +1815,41 @@ def build_klinechart_html(
               downColor: '#e5252a',
               noChangeColor: '#8b9aaa'
             }},
-            tooltip: {{
-              showRule: 'always'
-            }}
+            tooltip: {{ showRule: 'always' }}
           }},
           crosshair: {{
             horizontal: {{ line: {{ color: '#d7dee8', style: 'dashed' }} }},
             vertical: {{ line: {{ color: '#d7dee8', style: 'dashed' }} }}
+          }},
+          overlay: {{
+            point: {{
+              color: '#4aa3ff',
+              borderColor: '#f4f7fb',
+              borderSize: 1,
+              radius: 4,
+              activeColor: '#f4c430',
+              activeBorderColor: '#f4f7fb',
+              activeBorderSize: 1,
+              activeRadius: 5
+            }},
+            line: {{
+              color: '#4aa3ff',
+              size: 2,
+              activeColor: '#f4c430',
+              activeSize: 2
+            }}
           }}
         }}
       }});
 
       klinecharts.registerOverlay({{
         name: 'measureLine',
-        totalStep: 2,
+        totalStep: 3,
         needDefaultPointFigure: true,
         needDefaultXAxisFigure: true,
         needDefaultYAxisFigure: true,
         mode: 'weak_magnet',
+        modeSensitivity: 8,
         createPointFigures: (params) => {{
           const coordinates = params.coordinates || [];
           const points = (params.overlay && params.overlay.points) || [];
@@ -1679,14 +1861,18 @@ def build_klinechart_html(
           const valueDelta = (p1.value || 0) - (p0.value || 0);
           const pct = p0.value ? (valueDelta / p0.value) * 100 : 0;
           const bars = Math.abs((p1.dataIndex || 0) - (p0.dataIndex || 0));
+          const direction = valueDelta >= 0 ? '+' : '';
           const midX = (coordinates[0].x + coordinates[1].x) / 2;
           const midY = (coordinates[0].y + coordinates[1].y) / 2;
-          const text = valueDelta.toFixed(2) + ' (' + pct.toFixed(2) + '%) | ' + bars + ' barre';
+          const startDate = p0.timestamp ? new Date(p0.timestamp).toISOString().slice(0, 10) : '';
+          const endDate = p1.timestamp ? new Date(p1.timestamp).toISOString().slice(0, 10) : '';
+          const text = direction + valueDelta.toFixed(2) + ' (' + direction + pct.toFixed(2) + '%) | ' + bars + ' barre' +
+            (startDate && endDate ? ' | ' + startDate + ' -> ' + endDate : '');
           return [
             {{
               type: 'line',
               attrs: {{ coordinates }},
-              styles: {{ color: '#f4c430', size: 2 }}
+              styles: {{ color: '#f4c430', size: 2, style: 'dashed' }}
             }},
             {{
               type: 'text',
@@ -1714,45 +1900,219 @@ def build_klinechart_html(
         }}
       }});
 
+      klinecharts.registerOverlay({{
+        name: 'proFibonacci',
+        totalStep: 3,
+        needDefaultPointFigure: true,
+        needDefaultXAxisFigure: true,
+        needDefaultYAxisFigure: true,
+        mode: 'weak_magnet',
+        modeSensitivity: 8,
+        createPointFigures: (params) => {{
+          const coordinates = params.coordinates || [];
+          const points = (params.overlay && params.overlay.points) || [];
+          const levels = (params.overlay && params.overlay.extendData && params.overlay.extendData.levels) ||
+            [0, 0.382, 0.5, 0.618, 1];
+          if (coordinates.length < 2 || points.length < 2) {{
+            return [];
+          }}
+          const x1 = Math.min(coordinates[0].x, coordinates[1].x);
+          const x2 = Math.max(coordinates[0].x, coordinates[1].x);
+          const figures = [{{
+            type: 'line',
+            attrs: {{ coordinates }},
+            styles: {{ color: 'rgba(244,196,48,0.75)', size: 1, style: 'dashed' }}
+          }}];
+          levels.forEach(level => {{
+            const y = coordinates[0].y + ((coordinates[1].y - coordinates[0].y) * level);
+            const value = (points[0].value || 0) + (((points[1].value || 0) - (points[0].value || 0)) * level);
+            const pctLabel = (level * 100).toFixed(level === 0 || level === 1 ? 0 : 1) + '%';
+            figures.push({{
+              type: 'line',
+              attrs: {{ coordinates: [{{ x: x1, y }}, {{ x: x2, y }}] }},
+              styles: {{ color: '#4aa3ff', size: level === 0 || level === 1 ? 2 : 1 }}
+            }});
+            figures.push({{
+              type: 'text',
+              attrs: {{
+                x: x2 + 8,
+                y: y - 3,
+                text: pctLabel + '  ' + value.toFixed(2),
+                align: 'left',
+                baseline: 'bottom'
+              }},
+              styles: {{
+                color: '#f4f7fb',
+                size: 11,
+                backgroundColor: 'rgba(15,20,25,0.84)',
+                paddingLeft: 4,
+                paddingRight: 4,
+                paddingTop: 2,
+                paddingBottom: 2,
+                borderColor: 'rgba(74,163,255,0.6)',
+                borderSize: 1,
+                borderRadius: 3
+              }}
+            }});
+          }});
+          return figures;
+        }}
+      }});
+
       chart.applyNewData(data);
       chart.createIndicator('VOL');
       chart.createIndicator('MA', true, {{ id: 'candle_pane' }});
 
-      const buttons = document.querySelectorAll('button[data-tool], button[data-indicator]');
-      function setActive(button) {{
-        buttons.forEach(item => item.classList.remove('active'));
-        button.classList.add('active');
+      function clearActiveButtons() {{
+        document.querySelectorAll('button').forEach(item => item.classList.remove('active'));
       }}
 
-      document.querySelectorAll('button[data-tool]').forEach(button => {{
-        button.addEventListener('click', () => {{
-          setActive(button);
-          chart.createOverlay({{
-            name: button.dataset.tool,
-            groupId: 'manual',
-            mode: 'weak_magnet',
-            needDefaultPointFigure: true,
-            needDefaultXAxisFigure: true,
-            needDefaultYAxisFigure: true
-          }});
-        }});
-      }});
+      function rememberOverlay(event) {{
+        if (event && event.overlay && event.overlay.id) {{
+          overlayIds.add(event.overlay.id);
+          selectedOverlayId = event.overlay.id;
+        }}
+        return true;
+      }}
 
-      document.querySelectorAll('button[data-indicator]').forEach(button => {{
-        button.addEventListener('click', () => {{
-          setActive(button);
-          const name = button.dataset.indicator;
-          const overlay = button.dataset.overlay === '1';
-          if (overlay) {{
-            chart.createIndicator(name, true, {{ id: 'candle_pane' }});
-          }} else {{
-            chart.createIndicator(name);
+      function createManualOverlay(toolName) {{
+        const overlayConfig = {{
+          name: toolName,
+          groupId: overlayGroupId,
+          mode: 'weak_magnet',
+          modeSensitivity: 8,
+          needDefaultPointFigure: true,
+          needDefaultXAxisFigure: true,
+          needDefaultYAxisFigure: true,
+          onDrawEnd: event => {{
+            rememberOverlay(event);
+            setStatus('Disegno creato. Selezionalo e premi Canc per eliminarlo.');
+            return true;
+          }},
+          onSelected: event => {{
+            rememberOverlay(event);
+            setStatus('Disegno selezionato: pronto per modifica o eliminazione.');
+            return true;
+          }},
+          onRemoved: event => {{
+            if (event && event.overlay && event.overlay.id) {{
+              overlayIds.delete(event.overlay.id);
+              if (selectedOverlayId === event.overlay.id) {{
+                selectedOverlayId = null;
+              }}
+            }}
+            return true;
           }}
+        }};
+        if (toolName === 'proFibonacci') {{
+          overlayConfig.extendData = {{ levels: getFibLevels() }};
+        }}
+        const overlayId = chart.createOverlay(overlayConfig);
+        if (Array.isArray(overlayId)) {{
+          overlayId.filter(Boolean).forEach(id => overlayIds.add(id));
+        }} else if (overlayId) {{
+          overlayIds.add(overlayId);
+          selectedOverlayId = overlayId;
+        }}
+      }}
+
+      function armSelectedTool() {{
+        const select = document.getElementById('drawing-tool');
+        const toolName = select.value;
+        if (!toolName) {{
+          setStatus('Scegli prima uno strumento di disegno.');
+          return;
+        }}
+        clearActiveButtons();
+        document.getElementById('arm-tool').classList.add('active');
+        createManualOverlay(toolName);
+        setStatus('Strumento attivo: ' + select.options[select.selectedIndex].text + '. Disegna sul grafico.');
+      }}
+
+      document.getElementById('drawing-tool').addEventListener('change', event => {{
+        document.getElementById('fib-panel').classList.toggle('visible', event.target.value === 'proFibonacci');
+        if (event.target.value) {{
+          armSelectedTool();
+        }} else {{
+          setStatus('Navigazione pronta.');
+        }}
+      }});
+
+      document.getElementById('arm-tool').addEventListener('click', armSelectedTool);
+      document.getElementById('idle-tool').addEventListener('click', () => {{
+        document.getElementById('drawing-tool').value = '';
+        document.getElementById('fib-panel').classList.remove('visible');
+        clearActiveButtons();
+        document.getElementById('idle-tool').classList.add('active');
+        setStatus('Navigazione pronta.');
+      }});
+
+      document.querySelectorAll('input[data-fib]').forEach(input => {{
+        input.addEventListener('change', () => {{
+          setStatus('Livelli Fibonacci aggiornati per il prossimo disegno.');
         }});
       }});
 
+      function deleteSelectedOverlay() {{
+        if (selectedOverlayId) {{
+          const removed = chart.removeOverlay({{ id: selectedOverlayId }});
+          if (removed) {{
+            overlayIds.delete(selectedOverlayId);
+            selectedOverlayId = null;
+            setStatus('Disegno selezionato eliminato.');
+            return;
+          }}
+        }}
+        setStatus('Nessun disegno selezionato da eliminare.');
+      }}
+
+      document.getElementById('delete-selected').addEventListener('click', deleteSelectedOverlay);
       document.getElementById('clear-overlays').addEventListener('click', () => {{
-        chart.removeOverlay({{ groupId: 'manual' }});
+        const removed = chart.removeOverlay({{ groupId: overlayGroupId }});
+        overlayIds.clear();
+        selectedOverlayId = null;
+        setStatus(removed ? 'Tutti i disegni sono stati eliminati.' : 'Nessun disegno da eliminare.');
+      }});
+
+      document.getElementById('add-indicator').addEventListener('click', () => {{
+        const select = document.getElementById('indicator-tool');
+        const name = select.value;
+        if (!name) {{
+          setStatus('Scegli prima un indicatore.');
+          return;
+        }}
+        const option = select.options[select.selectedIndex];
+        if (option.dataset.overlay === '1') {{
+          chart.createIndicator(name, true, {{ id: 'candle_pane' }});
+        }} else {{
+          chart.createIndicator(name);
+        }}
+        clearActiveButtons();
+        document.getElementById('add-indicator').classList.add('active');
+        setStatus('Indicatore aggiunto: ' + name + '.');
+      }});
+
+      document.getElementById('reset-indicators').addEventListener('click', () => {{
+        ['MA', 'EMA', 'BOLL', 'SAR', 'VOL', 'MACD', 'RSI', 'KDJ'].forEach(name => {{
+          chart.removeIndicator({{ name }});
+        }});
+        chart.createIndicator('VOL');
+        chart.createIndicator('MA', true, {{ id: 'candle_pane' }});
+        clearActiveButtons();
+        document.getElementById('reset-indicators').classList.add('active');
+        setStatus('Indicatori ripristinati: VOL e MA.');
+      }});
+
+      window.addEventListener('keydown', event => {{
+        if (event.key === 'Delete' || event.key === 'Backspace') {{
+          deleteSelectedOverlay();
+        }}
+        if (event.key === 'Escape') {{
+          document.getElementById('drawing-tool').value = '';
+          document.getElementById('fib-panel').classList.remove('visible');
+          clearActiveButtons();
+          setStatus('Navigazione pronta.');
+        }}
       }});
 
       window.addEventListener('resize', () => chart.resize());
@@ -2237,7 +2597,7 @@ def render_asset_focus(
             )
             st.plotly_chart(
                 figure,
-                use_container_width=True,
+                width="stretch",
                 config={
                     "scrollZoom": True,
                     "doubleClick": "reset+autosize",
@@ -2385,6 +2745,18 @@ cached_market_assets = [
     ticker for ticker in market_assets
     if ticker in price_cache_status
 ]
+fresh_cached_market_assets = [
+    ticker for ticker in market_assets
+    if price_cache_status.get(ticker, {}).get("status") == "loaded"
+]
+stale_cached_market_assets = [
+    ticker for ticker in market_assets
+    if price_cache_status.get(ticker, {}).get("status") == "stale"
+]
+missing_cache_assets = [
+    ticker for ticker in market_assets
+    if ticker not in price_cache_status
+]
 market_loaded = bool(market_assets)
 market_label = " + ".join(selected_market_names)
 
@@ -2395,6 +2767,11 @@ if market_loaded:
     st.sidebar.caption(
         f"Cache prezzi daily: {len(cached_market_assets)} / "
         f"{len(market_assets)} ticker."
+    )
+    st.sidebar.caption(
+        f"Fresh: {len(fresh_cached_market_assets)} | "
+        f"Stale: {len(stale_cached_market_assets)} | "
+        f"Mancanti: {len(missing_cache_assets)}"
     )
 else:
     st.sidebar.warning("Nessun asset disponibile per i mercati selezionati.")
@@ -2478,7 +2855,7 @@ with st.sidebar.expander("Paniere e benchmark", expanded=False):
                 if st.button(
                     f"Rimuovi {ticker}",
                     key=f"manual_basket_remove_{ticker}",
-                    use_container_width=True
+                    width="stretch"
                 ):
                     st.session_state["manual_basket_assets"] = [
                         item for item in manual_basket_assets
@@ -2884,7 +3261,7 @@ with st.sidebar.expander("Setup strategia e backtest", expanded=False):
 
     preset_action_col1, preset_action_col2 = st.columns(2)
 
-    if preset_action_col1.button("Salva modifiche", use_container_width=True):
+    if preset_action_col1.button("Salva modifiche", width="stretch"):
         if active_preset_name in DEFAULT_BACKTEST_PRESETS:
             st.warning(
                 "I preset base restano protetti: usa 'Salva come nuovo'."
@@ -2896,7 +3273,7 @@ with st.sidebar.expander("Setup strategia e backtest", expanded=False):
 
     new_preset_name = st.text_input("Nome preset custom", value="")
 
-    if preset_action_col2.button("Salva come nuovo", use_container_width=True):
+    if preset_action_col2.button("Salva come nuovo", width="stretch"):
         if new_preset_name.strip():
             presets[new_preset_name.strip()] = edited_preset
             st.session_state["backtest_presets"] = presets
@@ -2905,7 +3282,7 @@ with st.sidebar.expander("Setup strategia e backtest", expanded=False):
 
     rename_col1, rename_col2 = st.columns(2)
 
-    if rename_col1.button("Rinomina", use_container_width=True):
+    if rename_col1.button("Rinomina", width="stretch"):
         if active_preset_name in DEFAULT_BACKTEST_PRESETS:
             st.warning(
                 "I preset base restano protetti: usa 'Salva come nuovo'."
@@ -2916,7 +3293,7 @@ with st.sidebar.expander("Setup strategia e backtest", expanded=False):
             save_backtest_presets(presets)
             st.rerun()
 
-    if rename_col2.button("Elimina", use_container_width=True):
+    if rename_col2.button("Elimina", width="stretch"):
         if active_preset_name not in DEFAULT_BACKTEST_PRESETS:
             presets.pop(active_preset_name, None)
             st.session_state["backtest_presets"] = presets
@@ -2944,7 +3321,7 @@ with st.sidebar.expander("Setup strategia e backtest", expanded=False):
         key="import_preset_name"
     )
 
-    if st.button("Importa e salva", use_container_width=True):
+    if st.button("Importa e salva", width="stretch"):
         if imported_file is not None:
             try:
                 imported_data = json.loads(
@@ -3004,7 +3381,7 @@ with st.sidebar.expander("Setup strategia e backtest", expanded=False):
 
     run_market_backtest = st.button(
         "Esegui Portfolio Backtest",
-        use_container_width=True
+        width="stretch"
     )
 
 # ====================
@@ -3084,7 +3461,7 @@ with overview_tab:
             portfolio=portfolio,
             title="Equity Curve Monitor"
         ),
-        use_container_width=True
+        width="stretch"
     )
 
     st.subheader("Watchlist & Asset Focus")
@@ -3136,7 +3513,7 @@ with overview_tab:
     if paper.empty:
         st.warning("Nessun report paper trading disponibile.")
     else:
-        st.dataframe(paper, use_container_width=True)
+        st.dataframe(paper, width="stretch")
 
 
 with scanner_tab:
@@ -3153,15 +3530,16 @@ with scanner_tab:
         else 0
     )
     favorite_count = len(st.session_state["favorite_watchlist"])
-    metric_row1 = st.columns(3)
-    metric_row1[0].metric("Mercati attivi", len(selected_market_names))
-    metric_row1[1].metric("Asset caricati", len(screener))
-    metric_row1[2].metric("Watchlist", favorite_count)
-
-    metric_row2 = st.columns(3)
-    metric_row2[0].metric("Con cache prezzi", len(cached_market_assets))
-    metric_row2[1].metric("Con dati scanner", scanner_asset_count)
-    metric_row2[2].metric("Provider falliti", len(catalog_failed_markets))
+    status_columns = st.columns(5)
+    status_columns[0].metric("Mercati", len(selected_market_names))
+    status_columns[1].metric("Asset", len(screener))
+    status_columns[2].metric("Scanner", scanner_asset_count)
+    status_columns[3].metric(
+        "Cache prezzi",
+        f"{len(cached_market_assets)}",
+        delta=f"{len(fresh_cached_market_assets)} fresh"
+    )
+    status_columns[4].metric("Watchlist", favorite_count)
 
     if catalog_failed_markets:
         failed_labels = [
@@ -3178,10 +3556,10 @@ with scanner_tab:
             "per popolare metriche e segnali; il catalogo resta filtrabile."
         )
 
-    scan_col1, scan_col2 = st.columns([2, 1])
+    scan_col1, scan_col2, scan_col3 = st.columns([1.4, 0.9, 1.7])
     run_live_scanner = scan_col1.button(
         "Esegui Scanner Live",
-        use_container_width=True,
+        width="stretch",
         help=(
             "Scansiona tutti gli asset dei mercati attivi, genera segnali "
             "e aggiorna i report in reports/."
@@ -3192,6 +3570,17 @@ with scanner_tab:
         value=True,
         help="Scansiona solo i ticker con dati gia scaricati per velocizzare."
     )
+    estimated_scan_tickers = (
+        len(cached_market_assets) if scan_only_cached else len(market_assets)
+    )
+    estimated_download_tickers = 0 if scan_only_cached else len(
+        missing_cache_assets + stale_cached_market_assets
+    )
+    scan_col3.caption(
+        f"Ticker stimati: {estimated_scan_tickers} | "
+        f"download potenziali: {estimated_download_tickers} | "
+        f"provider falliti: {len(catalog_failed_markets)}"
+    )
 
     if run_live_scanner:
         scan_tickers = (
@@ -3201,35 +3590,226 @@ with scanner_tab:
         if not scan_tickers:
             st.error("Nessun ticker disponibile per lo scanner.")
         else:
-            with st.spinner(
-                f"Scanner in corso su {len(scan_tickers)} ticker..."
-            ):
-                try:
-                    scan_result, plan_result, summary_result = (
-                        run_paper_trading_for_tickers(
-                            tickers=scan_tickers,
-                            market_label=market_label,
-                            capital=portfolio_initial_capital,
-                            top_n=int(get_preset_value(
-                                active_preset, "top_n_candidates"
-                            )),
-                            min_score=float(get_preset_value(
-                                active_preset, "min_scanner_score"
-                            )),
-                            risk_per_trade=0.01,
-                            atr_multiplier=2.0,
-                            strategy_config=edited_preset
-                        )
+            total_scan_steps = len(scan_tickers) + estimated_download_tickers
+            progress_update, progress_callback = build_backtest_progress_tracker(
+                total_scan_steps
+            )
+            progress_update(
+                f"Scanner in corso su {len(scan_tickers)} ticker"
+            )
+            try:
+                scan_result, plan_result, summary_result = (
+                    run_paper_trading_for_tickers(
+                        tickers=scan_tickers,
+                        market_label=market_label,
+                        capital=portfolio_initial_capital,
+                        top_n=int(get_preset_value(
+                            active_preset, "top_n_candidates"
+                        )),
+                        min_score=float(get_preset_value(
+                            active_preset, "min_scanner_score"
+                        )),
+                        risk_per_trade=0.01,
+                        atr_multiplier=2.0,
+                        strategy_config=edited_preset,
+                        download_missing=not scan_only_cached,
+                        progress_callback=progress_callback,
+                        progress_context={"preset": active_preset}
                     )
-                    st.success(
-                        f"Scanner completato: {len(scan_result)} asset "
-                        f"analizzati, {len(plan_result)} posizioni nel piano."
-                    )
-                    st.rerun()
-                except Exception as scan_error:
-                    st.error(f"Errore scanner: {scan_error}")
+                )
+                progress_update("Scanner completato")
+                st.success(
+                    f"Scanner completato: {len(scan_result)} asset "
+                    f"analizzati, {len(plan_result)} posizioni nel piano."
+                )
+                st.rerun()
+            except Exception as scan_error:
+                st.error(f"Errore scanner: {scan_error}")
 
     if not screener.empty:
+        st.divider()
+        st.caption("Screener")
+        quick_col1, quick_col2, quick_col3, quick_col4, quick_col5 = st.columns(
+            [1.15, 1.45, 1, 1, 0.85]
+        )
+
+        with quick_col1:
+            screener_preset = st.selectbox(
+                "Preset screener",
+                SCREENER_PRESETS,
+                key="screener_preset"
+            )
+            preset_defaults = get_screener_preset_defaults(screener_preset)
+
+        with quick_col2:
+            search_text = st.text_input(
+                "Cerca ticker o nome",
+                value="",
+                key=f"screener_search_{screener_preset}"
+            )
+
+        with quick_col3:
+            sort_by = st.selectbox(
+                "Ordina per",
+                SCREENER_SORT_OPTIONS,
+                index=SCREENER_SORT_OPTIONS.index(
+                    preset_defaults["sort_by"]
+                ),
+                key=f"screener_sort_{screener_preset}"
+            )
+
+        with quick_col4:
+            column_view = st.selectbox(
+                "Vista colonne",
+                list(SCREENER_COLUMN_VIEWS.keys()),
+                index=list(SCREENER_COLUMN_VIEWS.keys()).index(
+                    preset_defaults["column_view"]
+                ),
+                key=f"screener_column_view_{screener_preset}"
+            )
+
+        with quick_col5:
+            only_watchlist = st.checkbox(
+                "Solo watchlist",
+                value=preset_defaults["only_watchlist"],
+                key=f"screener_only_watchlist_{screener_preset}"
+            )
+
+        with st.expander(
+            "Filtri avanzati",
+            expanded=screener_preset == "Custom"
+        ):
+            universe_col, score_col, technical_col = st.columns(3)
+
+            with universe_col:
+                screener_market_filter = st.multiselect(
+                    "Mercati",
+                    options=selected_market_names,
+                    default=selected_market_names,
+                    key=f"screener_market_filter_{screener_preset}"
+                )
+                signal_options = ["ALL", "BUY", "SELL", "HOLD"]
+                signal_default = preset_defaults["signal_filter"]
+                selected_signal = st.selectbox(
+                    "Segnale",
+                    signal_options,
+                    index=(
+                        signal_options.index(signal_default)
+                        if signal_default in signal_options
+                        else 0
+                    ),
+                    key=f"screener_signal_{screener_preset}"
+                )
+                regime_options = ["ALL", "BULL", "SIDEWAYS", "BEAR"]
+                regime_default = preset_defaults["regime_filter"]
+                selected_regime = st.selectbox(
+                    "Regime",
+                    regime_options,
+                    index=(
+                        regime_options.index(regime_default)
+                        if regime_default in regime_options
+                        else 0
+                    ),
+                    key=f"screener_regime_{screener_preset}"
+                )
+                opportunity_options = [
+                    "Tutti",
+                    "Solo candidati long",
+                    "Solo sell/uscita"
+                ]
+                selected_opportunity = st.selectbox(
+                    "Opportunita",
+                    opportunity_options,
+                    index=opportunity_options.index(
+                        preset_defaults["opportunity_filter"]
+                    ),
+                    key=f"screener_opportunity_{screener_preset}"
+                )
+
+            with score_col:
+                min_score_filter = st.number_input(
+                    "Score minimo",
+                    value=(
+                        float(screener["scanner_score"].min())
+                        if screener["scanner_score"].notna().any()
+                        else -999.0
+                    ),
+                    step=5.0,
+                    key=f"screener_min_score_{screener_preset}"
+                )
+                close_values = pd.to_numeric(
+                    screener["close"],
+                    errors="coerce"
+                )
+                default_price_min = (
+                    float(close_values.min())
+                    if close_values.notna().any()
+                    else 0.0
+                )
+                default_price_max = (
+                    float(close_values.max())
+                    if close_values.notna().any()
+                    else 1000.0
+                )
+                price_min_filter = st.number_input(
+                    "Prezzo minimo",
+                    min_value=0.0,
+                    value=preset_defaults["price_min"] or default_price_min,
+                    step=0.5,
+                    key=f"screener_price_min_{screener_preset}"
+                )
+                price_max_filter = st.number_input(
+                    "Prezzo massimo",
+                    min_value=0.0,
+                    value=preset_defaults["price_max"] or default_price_max,
+                    step=0.5,
+                    key=f"screener_price_max_{screener_preset}"
+                )
+
+            with technical_col:
+                rsi_min_filter = st.number_input(
+                    "RSI minimo",
+                    min_value=0.0,
+                    max_value=100.0,
+                    value=preset_defaults["rsi_min"] or 0.0,
+                    step=1.0,
+                    key=f"screener_rsi_min_{screener_preset}"
+                )
+                rsi_max_filter = st.number_input(
+                    "RSI massimo",
+                    min_value=0.0,
+                    max_value=100.0,
+                    value=preset_defaults["rsi_max"] or 100.0,
+                    step=1.0,
+                    key=f"screener_rsi_max_{screener_preset}"
+                )
+                volume_ratio_min_filter = st.number_input(
+                    "Vol ratio minimo",
+                    min_value=0.0,
+                    value=preset_defaults["volume_ratio_min"] or 0.0,
+                    step=0.1,
+                    key=f"screener_volume_min_{screener_preset}"
+                )
+                default_atr_max = (
+                    float(screener["volatility_%"].max())
+                    if screener["volatility_%"].notna().any()
+                    else 100.0
+                )
+                atr_min_filter = st.number_input(
+                    "ATR % minimo",
+                    min_value=0.0,
+                    value=preset_defaults["atr_min"] or 0.0,
+                    step=0.5,
+                    key=f"screener_atr_min_{screener_preset}"
+                )
+                atr_max_filter = st.number_input(
+                    "ATR % massimo",
+                    min_value=0.0,
+                    value=preset_defaults["atr_max"] or default_atr_max,
+                    step=0.5,
+                    key=f"screener_atr_max_{screener_preset}"
+                )
+
         with st.expander("Ricerca globale fuori dai filtri", expanded=False):
             render_global_asset_search(
                 all_asset_records,
@@ -3237,75 +3817,6 @@ with scanner_tab:
                 key_prefix="scanner_global",
                 allow_basket=True,
                 layout="full"
-            )
-
-        filter_col1, filter_col2, filter_col3, filter_col4 = st.columns(4)
-
-        with filter_col1:
-            screener_market_filter = st.multiselect(
-                "Mercati",
-                options=selected_market_names,
-                default=selected_market_names,
-                key="screener_market_filter"
-            )
-            search_text = st.text_input(
-                "Cerca ticker o nome",
-                value="",
-                key="screener_search"
-            )
-
-        with filter_col2:
-            only_watchlist = st.checkbox(
-                "Solo watchlist",
-                value=False,
-                key="screener_only_watchlist"
-            )
-            min_score_filter = st.number_input(
-                "Score minimo",
-                value=(
-                    float(screener["scanner_score"].min())
-                    if screener["scanner_score"].notna().any()
-                    else -999.0
-                ),
-                step=5.0
-            )
-            max_atr_filter = st.number_input(
-                "ATR % massimo",
-                min_value=0.0,
-                value=(
-                    float(screener["volatility_%"].max())
-                    if screener["volatility_%"].notna().any()
-                    else 100.0
-                ),
-                step=0.5
-            )
-
-        with filter_col3:
-            signal_options = [
-                option for option in ["ALL", "BUY", "SELL", "HOLD"]
-                if option == "ALL" or option in set(
-                    screener["signal"].dropna().tolist()
-                )
-            ]
-            selected_signal = st.selectbox(
-                "Signal",
-                signal_options
-            )
-            selected_opportunity = st.selectbox(
-                "Opportunita",
-                ["Tutti", "Solo candidati long", "Solo sell/uscita"]
-            )
-
-        with filter_col4:
-            regime_options = [
-                option for option in ["ALL", "BULL", "SIDEWAYS", "BEAR"]
-                if option == "ALL" or option in set(
-                    screener["market_regime"].dropna().tolist()
-                )
-            ]
-            selected_regime = st.selectbox(
-                "Regime",
-                regime_options
             )
 
         screener_view = filter_screener_dataframe(
@@ -3317,63 +3828,73 @@ with scanner_tab:
             regime_filter=selected_regime,
             opportunity_filter=selected_opportunity,
             min_score=min_score_filter,
-            max_atr_pct=max_atr_filter
+            price_min=price_min_filter,
+            price_max=price_max_filter,
+            rsi_min=rsi_min_filter,
+            rsi_max=rsi_max_filter,
+            volume_ratio_min=volume_ratio_min_filter,
+            atr_min=atr_min_filter,
+            atr_max=atr_max_filter
         )
+        screener_view = sort_screener_dataframe(screener_view, sort_by)
 
         st.caption(
-            f"Asset visibili: {len(screener_view)} / {len(screener)}"
+            f"Risultati: {len(screener_view)} / {len(screener)} | "
+            f"Preset: {screener_preset} | Ordinamento: {sort_by}"
         )
 
         edited_screener = render_screener_editor(
             screener_view,
-            key="market_screener_editor"
+            key="market_screener_editor",
+            column_view=column_view
         )
         sync_watchlist_from_editor(edited_screener)
 
         focus_options = edited_screener["ticker"].tolist()
         selected_scanner_ticker = None
 
-        if focus_options:
-            default_focus = st.session_state.get("asset_focus_ticker")
-            focus_in_active_view = default_focus in focus_options
-            selected_scanner_ticker = st.selectbox(
-                "Asset focus",
-                focus_options,
-                index=(
-                    focus_options.index(default_focus)
-                    if focus_in_active_view
-                    else 0
-                ),
-                format_func=lambda ticker: format_asset_label(
-                    asset_lookup.get(
-                        ticker,
-                        {"ticker": ticker, "name": ticker}
-                    )
-                ),
-                key="scanner_focus"
-            )
-            if focus_in_active_view or default_focus is None:
-                set_asset_focus(selected_scanner_ticker)
-            else:
-                st.caption(
-                    "Il focus attuale arriva dalla ricerca globale e resta "
-                    "visibile anche se fuori dai filtri dello screener."
+        with st.expander("Asset focus", expanded=False):
+            if focus_options:
+                default_focus = st.session_state.get("asset_focus_ticker")
+                focus_in_active_view = default_focus in focus_options
+                selected_scanner_ticker = st.selectbox(
+                    "Asset",
+                    focus_options,
+                    index=(
+                        focus_options.index(default_focus)
+                        if focus_in_active_view
+                        else 0
+                    ),
+                    format_func=lambda ticker: format_asset_label(
+                        asset_lookup.get(
+                            ticker,
+                            {"ticker": ticker, "name": ticker}
+                        )
+                    ),
+                    key="scanner_focus"
                 )
+                if focus_in_active_view or default_focus is None:
+                    set_asset_focus(selected_scanner_ticker)
+                else:
+                    st.caption(
+                        "Il focus attuale arriva dalla ricerca globale e resta "
+                        "visibile anche se fuori dai filtri dello screener."
+                    )
 
-        persisted_focus_ticker = st.session_state.get("asset_focus_ticker")
+            persisted_focus_ticker = st.session_state.get("asset_focus_ticker")
 
-        if persisted_focus_ticker:
-            render_asset_focus(
-                persisted_focus_ticker,
-                scanner,
-                key_prefix="scanner",
-                asset_lookup=asset_lookup,
-                strategy_config=edited_preset
-            )
+            if persisted_focus_ticker:
+                render_asset_focus(
+                    persisted_focus_ticker,
+                    scanner,
+                    key_prefix="scanner",
+                    asset_lookup=asset_lookup,
+                    strategy_config=edited_preset
+                )
 
     if not reports["decisions"].empty:
         with st.expander("Decision log scanner", expanded=False):
-            st.dataframe(reports["decisions"], use_container_width=True)
+            st.dataframe(reports["decisions"], width="stretch")
 
 
 with portfolio_tab:
@@ -3387,7 +3908,7 @@ with portfolio_tab:
     if paper.empty:
         st.warning("Nessun paper portfolio trovato.")
     else:
-        st.dataframe(paper, use_container_width=True)
+        st.dataframe(paper, width="stretch")
 
     previous_paper_file = get_previous_file(
         "reports/paper_portfolio_plan_*.csv"
@@ -3420,7 +3941,7 @@ with portfolio_tab:
         ])
 
         st.subheader("Confronto con run precedente")
-        st.dataframe(comparison_df, use_container_width=True)
+        st.dataframe(comparison_df, width="stretch")
 
     with st.expander("Audit files", expanded=False):
         render_file_reference(
@@ -3453,7 +3974,7 @@ with backtest_tab:
     page_run_market_backtest = st.button(
         "Esegui backtest",
         type="primary",
-        use_container_width=True
+        width="stretch"
     )
     backtest_requested = run_market_backtest or page_run_market_backtest
 
@@ -3544,7 +4065,8 @@ with backtest_tab:
             price_data_by_ticker, price_load_metadata = load_market_price_data(
                 tickers=backtest_assets,
                 progress_callback=progress_callback,
-                return_metadata=True
+                return_metadata=True,
+                download_missing=not use_only_cached_assets
             )
             price_load_metadata["memory_reused"] = False
             st.session_state["backtest_price_data_cache"] = {
@@ -3789,20 +4311,20 @@ with backtest_tab:
                 benchmark_curves=benchmark_curves,
                 selected_market=result_market_label
             ),
-            use_container_width=True
+            width="stretch"
         )
 
         st.subheader("Confronto preset")
         st.dataframe(
             pd.DataFrame(strategy_metrics_list),
-            use_container_width=True
+            width="stretch"
         )
 
         if benchmark_metrics_list:
             st.subheader("Benchmark Baskets")
             st.dataframe(
                 pd.DataFrame(benchmark_metrics_list),
-                use_container_width=True
+                width="stretch"
             )
 
         result_tab1, result_tab2, result_tab3, result_tab4 = st.tabs([
@@ -3821,13 +4343,13 @@ with backtest_tab:
                 item for item in strategy_curves
                 if item["name"] == selected_result_name
             )
-            st.dataframe(selected_result["history"], use_container_width=True)
+            st.dataframe(selected_result["history"], width="stretch")
 
         with result_tab2:
             for benchmark in benchmark_curves:
                 st.subheader(benchmark["name"])
                 st.caption("Asset: " + ", ".join(benchmark["assets"]))
-                st.dataframe(benchmark["history"], use_container_width=True)
+                st.dataframe(benchmark["history"], width="stretch")
 
         with result_tab3:
             for strategy in strategy_curves:
@@ -3911,20 +4433,20 @@ with glossary_tab:
 
     st.dataframe(
         pd.DataFrame(STRATEGY_RULES),
-        use_container_width=True,
+        width="stretch",
         hide_index=True
     )
 
     st.subheader("Parametri strategia")
     st.dataframe(
         pd.DataFrame(STRATEGY_PARAMETERS),
-        use_container_width=True,
+        width="stretch",
         hide_index=True
     )
 
     st.subheader("Legenda termini")
     st.dataframe(
         pd.DataFrame(TRADING_TERMS),
-        use_container_width=True,
+        width="stretch",
         hide_index=True
     )

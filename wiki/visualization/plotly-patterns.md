@@ -14,7 +14,7 @@ Current Plotly usage is direct and explicit through `plotly.graph_objects`.
 - `hovermode="x unified"` for equity comparisons.
 - `hovermode="x"` plus spike lines for trading-board style price charts.
 - `customdata` plus `hovertemplate` for richer timeline inspection.
-- `st.plotly_chart(..., use_container_width=True)` for Streamlit rendering.
+- `st.plotly_chart(..., width="stretch")` for Streamlit rendering.
 
 ## Trading Chart Pattern
 
