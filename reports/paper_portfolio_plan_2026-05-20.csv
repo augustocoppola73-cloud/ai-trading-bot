@@ -1,4 +1,0 @@
-ticker,scanner_score,market_regime,signal,position_status,decision_reason,entry_price,atr,stop_loss_price,initial_trailing_stop,risk_per_trade_%,risk_$,risk_%,capital_allocation_%,capital_allocation_$,estimated_quantity,estimated_max_loss_$
-SBUX,203.47,BULL,BUY,SELECTED,SELECTED_VALID_BUY_SETUP,105.95,2.6184,100.71,99.4,1.0,10.0,1.0,20.23,202.32,1.9096,10.0
-PAGP,213.71,BULL,BUY,SELECTED,SELECTED_VALID_BUY_SETUP,24.98,0.5592,23.86,23.58,1.0,7.98,0.8,17.82,178.17,7.1323,7.98
-FFUT,201.89,BULL,BUY,SELECTED,SELECTED_VALID_BUY_SETUP,59.94,0.733,58.47,58.11,1.0,6.2,0.62,25.33,253.3,4.2259,6.2

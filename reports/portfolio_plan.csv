@@ -1,2 +1,0 @@
-ticker,scanner_score,market_regime,signal,entry_price,atr,stop_loss_price,initial_trailing_stop,risk_per_trade_%,capital_allocation_%,capital_allocation_$,estimated_quantity,estimated_max_loss_$
-NVDA,153.74,BULL,BUY,220.78,6.9072,206.97,203.51,1.0,15.98,159.82,0.7239,10.0
